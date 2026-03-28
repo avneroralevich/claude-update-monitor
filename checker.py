@@ -16,6 +16,7 @@ from datetime import datetime
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 GITHUB_TOKEN     = os.environ.get("GITHUB_TOKEN", "")   # auto-set by Actions
+GEMINI_API_KEY   = os.environ.get("GEMINI_API_KEY", "")
 LAST_SEEN_FILE   = "last_seen.json"
 
 WEB_HEADERS = {
@@ -51,15 +52,31 @@ def send_telegram(text: str):
     else:
         print(f"[Telegram] error {resp.status_code}: {resp.text}")
 
-# ── Translation ─────────────────────────────────────────────────────────────────
-def translate_he(text: str) -> str:
-    """Translate English text to Hebrew using Google Translate (free)."""
+# ── Hebrew explanation via Gemini ─────────────────────────────────────────────
+def explain_hebrew(text: str) -> str:
+    """Generate a simple Hebrew explanation using Google Gemini API (free tier)."""
+    if not GEMINI_API_KEY:
+        print("[Gemini] API key not configured, skipping Hebrew explanation")
+        return ""
     try:
-        from deep_translator import GoogleTranslator
-        chunk = text[:450]
-        return GoogleTranslator(source="en", target="iw").translate(chunk) or ""
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+        prompt = (
+            "אתה עוזר טכני שמסביר עדכוני תוכנה בעברית פשוטה.\n"
+            "קיבלת את העדכון הבא באנגלית. תן הסבר קצר (2-3 משפטים) בעברית פשוטה "
+            "שגם מי שלא מתכנת יבין. אל תתרגם מילה במילה - תסביר את המשמעות.\n\n"
+            f"העדכון:\n{text[:800]}"
+        )
+        resp = requests.post(url, json={
+            "contents": [{"parts": [{"text": prompt}]}]
+        }, timeout=20)
+        if resp.ok:
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        else:
+            print(f"[Gemini] error {resp.status_code}: {resp.text[:200]}")
+            return ""
     except Exception as exc:
-        print(f"[translate] {exc}")
+        print(f"[Gemini] {exc}")
         return ""
 
 # ── Message formatter ───────────────────────────────────────────────────────────
@@ -89,7 +106,7 @@ def build_message(emoji: str, source: str, items: list[dict], fallback_url: str)
         # Hebrew translation of the most descriptive text
         source_text = title or body
         if source_text:
-            heb = translate_he(source_text)
+            heb = explain_hebrew(source_text)
             if heb:
                 lines.append(f"\n🇮🇱 <i>{heb}</i>")
 
