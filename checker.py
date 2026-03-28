@@ -44,16 +44,17 @@ def save_subscribers(subs: list[int]):
         json.dump(sorted(set(subs)), f)
 
 # ── Subscriber management ────────────────────────────────────────────────────
-def check_new_subscribers():
-    """Check for /start messages and register new subscribers."""
+def check_new_subscribers() -> list[int]:
+    """Check for /start, /stop, /summary messages. Returns list of chat_ids requesting summary."""
+    summary_requesters = []
     if not TELEGRAM_TOKEN:
-        return
-    print("[Subscribers] checking for new /start messages …")
+        return summary_requesters
+    print("[Subscribers] checking for commands …")
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
     resp = requests.get(url, timeout=15)
     if not resp.ok:
         print(f"  Error {resp.status_code}")
-        return
+        return summary_requesters
 
     subs = load_subscribers()
     new_count = 0
@@ -62,14 +63,16 @@ def check_new_subscribers():
     for update in resp.json().get("result", []):
         max_update_id = max(max_update_id, update["update_id"])
         msg = update.get("message", {})
-        text = msg.get("text", "")
+        text = msg.get("text", "").strip()
         chat_id = msg.get("chat", {}).get("id")
-        if chat_id and text.strip().startswith("/start") and chat_id not in subs:
+        if not chat_id:
+            continue
+
+        if text.startswith("/start") and chat_id not in subs:
             subs.append(chat_id)
             new_count += 1
             name = msg.get("chat", {}).get("first_name", "Unknown")
             print(f"  New subscriber: {name} ({chat_id})")
-            # Send welcome message
             requests.post(
                 f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
                 json={"chat_id": chat_id, "text":
@@ -79,10 +82,12 @@ def check_new_subscribers():
                     "- Anthropic News\n"
                     "- Claude API changes\n"
                     "- Claude.ai updates\n\n"
-                    "Send /stop to unsubscribe."},
+                    "Commands:\n"
+                    "/summary - Get latest status report\n"
+                    "/stop - Unsubscribe"},
                 timeout=15,
             )
-        elif chat_id and text.strip().startswith("/stop"):
+        elif text.startswith("/stop"):
             if chat_id in subs:
                 subs.remove(chat_id)
                 print(f"  Unsubscribed: {chat_id}")
@@ -91,6 +96,9 @@ def check_new_subscribers():
                     json={"chat_id": chat_id, "text": "You've been unsubscribed. Send /start to re-subscribe."},
                     timeout=15,
                 )
+        elif text.startswith("/summary"):
+            print(f"  Summary requested by {chat_id}")
+            summary_requesters.append(chat_id)
 
     # Mark updates as read
     if max_update_id:
@@ -98,6 +106,7 @@ def check_new_subscribers():
 
     save_subscribers(subs)
     print(f"  Total subscribers: {len(subs)} (+{new_count} new)")
+    return summary_requesters
 
 # ── Telegram ────────────────────────────────────────────────────────────────────
 def send_telegram(text: str):
@@ -121,6 +130,22 @@ def send_telegram(text: str):
             print(f"[Telegram] sent to {chat_id}")
         else:
             print(f"[Telegram] error {resp.status_code} for {chat_id}: {resp.text}")
+
+def send_telegram_to(chat_id: int, text: str):
+    """Send a message to a specific chat_id."""
+    if not TELEGRAM_TOKEN:
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    resp = requests.post(url, json={
+        "chat_id":                  chat_id,
+        "text":                     text,
+        "parse_mode":               "HTML",
+        "disable_web_page_preview": False,
+    }, timeout=15)
+    if resp.ok:
+        print(f"[Telegram] summary sent to {chat_id}")
+    else:
+        print(f"[Telegram] error {resp.status_code} for {chat_id}")
 
 # ── Message formatter ───────────────────────────────────────────────────────────
 def build_message(emoji: str, source: str, items: list[dict], fallback_url: str) -> str:
@@ -282,7 +307,7 @@ def main():
     print(f"Claude Update Monitor — {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"{'='*50}\n")
 
-    check_new_subscribers()
+    summary_requesters = check_new_subscribers()
 
     last_seen     = load_last_seen()
     new_last_seen = dict(last_seen)
@@ -370,10 +395,17 @@ def main():
         "💬 Claude.ai → support.claude.com release notes",
     ]
 
-    send_telegram("\n".join(summary_lines))
+    summary_text = "\n".join(summary_lines)
+    send_telegram(summary_text)
+
+    # ── Handle /summary requests ─────────────────────────────────────────────
+    for chat_id in summary_requesters:
+        send_telegram_to(chat_id, summary_text)
 
     print(f"\n{'='*50}")
     print(f"Done. {sent} update notification(s) + 1 daily summary sent.")
+    if summary_requesters:
+        print(f"  + {len(summary_requesters)} on-demand summary request(s)")
     print(f"{'='*50}\n")
 
 

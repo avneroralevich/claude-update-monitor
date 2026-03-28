@@ -2,7 +2,8 @@ name: Daily Claude Update Check
 
 on:
   schedule:
-    - cron: '0 7 * * *'   # every day at 07:00 UTC (10:00 Israel time)
+    - cron: '0 7 * * *'   # daily full check at 07:00 UTC (10:00 Israel)
+    - cron: '0 */2 * * *' # every 2 hours — process commands (/summary etc.)
   workflow_dispatch:        # allow manual trigger
 
 permissions:
