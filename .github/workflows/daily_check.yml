@@ -29,6 +29,7 @@ jobs:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
         run: python checker.py
 
       - name: Commit updated last_seen.json
