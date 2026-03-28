@@ -14,10 +14,9 @@ from datetime import datetime
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 TELEGRAM_TOKEN   = os.environ.get("TELEGRAM_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 GITHUB_TOKEN     = os.environ.get("GITHUB_TOKEN", "")   # auto-set by Actions
-GEMINI_API_KEY   = os.environ.get("GEMINI_API_KEY", "")
 LAST_SEEN_FILE   = "last_seen.json"
+SUBSCRIBERS_FILE = "subscribers.json"
 
 WEB_HEADERS = {
     "User-Agent": "Mozilla/5.0 (compatible; ClaudeUpdateMonitor/1.0)"
@@ -34,34 +33,94 @@ def save_last_seen(data: dict):
     with open(LAST_SEEN_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
+def load_subscribers() -> list[int]:
+    if os.path.exists(SUBSCRIBERS_FILE):
+        with open(SUBSCRIBERS_FILE, encoding="utf-8") as f:
+            return json.load(f)
+    return []
+
+def save_subscribers(subs: list[int]):
+    with open(SUBSCRIBERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(sorted(set(subs)), f)
+
+# ── Subscriber management ────────────────────────────────────────────────────
+def check_new_subscribers():
+    """Check for /start messages and register new subscribers."""
+    if not TELEGRAM_TOKEN:
+        return
+    print("[Subscribers] checking for new /start messages …")
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/getUpdates"
+    resp = requests.get(url, timeout=15)
+    if not resp.ok:
+        print(f"  Error {resp.status_code}")
+        return
+
+    subs = load_subscribers()
+    new_count = 0
+    max_update_id = 0
+
+    for update in resp.json().get("result", []):
+        max_update_id = max(max_update_id, update["update_id"])
+        msg = update.get("message", {})
+        text = msg.get("text", "")
+        chat_id = msg.get("chat", {}).get("id")
+        if chat_id and text.strip().startswith("/start") and chat_id not in subs:
+            subs.append(chat_id)
+            new_count += 1
+            name = msg.get("chat", {}).get("first_name", "Unknown")
+            print(f"  New subscriber: {name} ({chat_id})")
+            # Send welcome message
+            requests.post(
+                f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text":
+                    "Welcome to Claude Update Monitor!\n\n"
+                    "You'll receive daily updates about:\n"
+                    "- Claude Code releases\n"
+                    "- Anthropic News\n"
+                    "- Claude API changes\n"
+                    "- Claude.ai updates\n\n"
+                    "Send /stop to unsubscribe."},
+                timeout=15,
+            )
+        elif chat_id and text.strip().startswith("/stop"):
+            if chat_id in subs:
+                subs.remove(chat_id)
+                print(f"  Unsubscribed: {chat_id}")
+                requests.post(
+                    f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+                    json={"chat_id": chat_id, "text": "You've been unsubscribed. Send /start to re-subscribe."},
+                    timeout=15,
+                )
+
+    # Mark updates as read
+    if max_update_id:
+        requests.get(url, params={"offset": max_update_id + 1}, timeout=15)
+
+    save_subscribers(subs)
+    print(f"  Total subscribers: {len(subs)} (+{new_count} new)")
+
 # ── Telegram ────────────────────────────────────────────────────────────────────
 def send_telegram(text: str):
-    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("[Telegram] credentials not configured — printing message instead:\n")
+    if not TELEGRAM_TOKEN:
+        print("[Telegram] token not configured — printing message instead:\n")
         print(text)
         return
-    url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    resp = requests.post(url, json={
-        "chat_id":                  TELEGRAM_CHAT_ID,
-        "text":                     text,
-        "parse_mode":               "HTML",
-        "disable_web_page_preview": False,
-    }, timeout=15)
-    if resp.ok:
-        print("[Telegram] message sent.")
-    else:
-        print(f"[Telegram] error {resp.status_code}: {resp.text}")
-
-# ── Translation ─────────────────────────────────────────────────────────────────
-def explain_hebrew(text: str) -> str:
-    """Translate English text to Hebrew using Google Translate (free)."""
-    try:
-        from deep_translator import GoogleTranslator
-        chunk = text[:450]
-        return GoogleTranslator(source="en", target="iw").translate(chunk) or ""
-    except Exception as exc:
-        print(f"[translate] {exc}")
-        return ""
+    subs = load_subscribers()
+    if not subs:
+        print("[Telegram] no subscribers yet.")
+        return
+    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+    for chat_id in subs:
+        resp = requests.post(url, json={
+            "chat_id":                  chat_id,
+            "text":                     text,
+            "parse_mode":               "HTML",
+            "disable_web_page_preview": False,
+        }, timeout=15)
+        if resp.ok:
+            print(f"[Telegram] sent to {chat_id}")
+        else:
+            print(f"[Telegram] error {resp.status_code} for {chat_id}: {resp.text}")
 
 # ── Message formatter ───────────────────────────────────────────────────────────
 def build_message(emoji: str, source: str, items: list[dict], fallback_url: str) -> str:
@@ -222,6 +281,8 @@ def main():
     print(f"\n{'='*50}")
     print(f"Claude Update Monitor — {datetime.now().strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"{'='*50}\n")
+
+    check_new_subscribers()
 
     last_seen     = load_last_seen()
     new_last_seen = dict(last_seen)

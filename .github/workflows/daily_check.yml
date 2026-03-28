@@ -27,15 +27,13 @@ jobs:
       - name: Run checker
         env:
           TELEGRAM_TOKEN:   ${{ secrets.TELEGRAM_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GITHUB_TOKEN:     ${{ secrets.GITHUB_TOKEN }}
-          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
         run: python checker.py
 
-      - name: Commit updated last_seen.json
+      - name: Commit updated state
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add last_seen.json
-          git diff --cached --quiet || git commit -m "chore: update last_seen [skip ci]"
+          git add last_seen.json subscribers.json
+          git diff --cached --quiet || git commit -m "chore: update state [skip ci]"
           git push
