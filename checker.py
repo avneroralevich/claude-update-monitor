@@ -52,31 +52,15 @@ def send_telegram(text: str):
     else:
         print(f"[Telegram] error {resp.status_code}: {resp.text}")
 
-# ── Hebrew explanation via Gemini ─────────────────────────────────────────────
+# ── Translation ─────────────────────────────────────────────────────────────────
 def explain_hebrew(text: str) -> str:
-    """Generate a simple Hebrew explanation using Google Gemini API (free tier)."""
-    if not GEMINI_API_KEY:
-        print("[Gemini] API key not configured, skipping Hebrew explanation")
-        return ""
+    """Translate English text to Hebrew using Google Translate (free)."""
     try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key={GEMINI_API_KEY}"
-        prompt = (
-            "אתה עוזר טכני שמסביר עדכוני תוכנה בעברית פשוטה.\n"
-            "קיבלת את העדכון הבא באנגלית. תן הסבר קצר (2-3 משפטים) בעברית פשוטה "
-            "שגם מי שלא מתכנת יבין. אל תתרגם מילה במילה - תסביר את המשמעות.\n\n"
-            f"העדכון:\n{text[:800]}"
-        )
-        resp = requests.post(url, json={
-            "contents": [{"parts": [{"text": prompt}]}]
-        }, timeout=20)
-        if resp.ok:
-            data = resp.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-        else:
-            print(f"[Gemini] error {resp.status_code}: {resp.text[:200]}")
-            return ""
+        from deep_translator import GoogleTranslator
+        chunk = text[:450]
+        return GoogleTranslator(source="en", target="iw").translate(chunk) or ""
     except Exception as exc:
-        print(f"[Gemini] {exc}")
+        print(f"[translate] {exc}")
         return ""
 
 # ── Message formatter ───────────────────────────────────────────────────────────
