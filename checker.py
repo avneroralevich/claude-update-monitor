@@ -87,13 +87,6 @@ def build_message(emoji: str, source: str, items: list[dict], fallback_url: str)
             short = body[:400] + "…" if len(body) > 400 else body
             lines.append(short)
 
-        # Hebrew translation of the most descriptive text
-        source_text = title or body
-        if source_text:
-            heb = explain_hebrew(source_text)
-            if heb:
-                lines.append(f"\n🇮🇱 <i>{heb}</i>")
-
         lines.append(f'\n🔗 <a href="{url}">Full release notes →</a>')
 
     return "\n".join(lines)
